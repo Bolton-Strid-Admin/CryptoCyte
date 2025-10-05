@@ -1,0 +1,265 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20PausableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/draft-ERC20PermitUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
+
+/// @custom:security-contact security@Bolton-Strid.org
+contract CryptoCyte is
+    Initializable,
+    ERC20Upgradeable,
+    ERC20PausableUpgradeable,
+    AccessControlUpgradeable,
+    ERC20PermitUpgradeable,
+    UUPSUpgradeable,
+    ReentrancyGuardUpgradeable
+{
+    // -------------------------
+    // Roles
+    // -------------------------
+    bytes32 public constant MINTER_ROLE   = keccak256("MINTER_ROLE");
+    bytes32 public constant PAUSER_ROLE   = keccak256("PAUSER_ROLE");
+    bytes32 public constant UPGRADER_ROLE = keccak256("UPGRADER_ROLE");
+
+    // -------------------------
+    // State variables
+    // -------------------------
+    mapping(address => uint256) private _userFrozenBalances;
+    mapping(address => bool) private _pausedWallets;
+    mapping(address => bool) private _contractWhitelist;
+
+    // Primary wallet → Guardian wallet mapping
+    mapping(address => address) private _primaryToGuardian;
+    mapping(address => bool) private _whitelistedWallets;
+
+    bool private _upgradeApproved;
+
+    // -------------------------
+    // Events
+    // -------------------------
+    event UpgradeApproved(address indexed approver);
+    event UpgradeExecuted(address indexed implementation);
+    event TokensFrozen(address indexed owner, uint256 amount);
+    event TokensUnfrozen(address indexed owner, uint256 amount);
+    event WalletPaused(address indexed account);
+    event WalletUnpaused(address indexed account);
+    event ContractWhitelisted(address indexed contractAddress, address indexed admin);
+    event ContractRemovedFromWhitelist(address indexed contractAddress, address indexed admin);
+    event WalletsWhitelisted(address indexed primary, address indexed guardian);
+
+    // -------------------------
+    // Custom errors
+    // -------------------------
+    error TransferExceedsAvailable(address from, uint256 requested, uint256 available);
+    error WalletPausedError(address from);
+    error NotGuardian(address caller);
+
+    // -------------------------
+    // Initialization
+    // -------------------------
+    function initialize(address initialOwner) public initializer {
+        __ERC20_init("CryptoCyte", "CD355");
+        __ERC20Pausable_init();
+        __AccessControl_init();
+        __ERC20Permit_init("CryptoCyte");
+        __UUPSUpgradeable_init();
+        __ReentrancyGuard_init();
+
+        _grantRole(DEFAULT_ADMIN_ROLE, initialOwner);
+        _grantRole(MINTER_ROLE, initialOwner);
+        _grantRole(PAUSER_ROLE, initialOwner);
+        _grantRole(UPGRADER_ROLE, initialOwner);
+    }
+
+    function decimals() public pure override returns (uint8) {
+        return 6;
+    }
+
+    // -------------------------
+    // Whitelist primary and guardian wallets (admin only)
+    // -------------------------
+    function whitelistWallets(address primary, address guardian) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        require(primary != address(0) && guardian != address(0), "CryptoCyte: invalid addresses");
+        _primaryToGuardian[primary] = guardian;
+        _whitelistedWallets[primary] = true;
+        _whitelistedWallets[guardian] = true;
+        emit WalletsWhitelisted(primary, guardian);
+    }
+
+    function getGuardian(address primary) external view returns (address) {
+        return _primaryToGuardian[primary];
+    }
+
+    function isWalletWhitelisted(address wallet) external view returns (bool) {
+        return _whitelistedWallets[wallet];
+    }
+
+    // -------------------------
+    // Freeze / Unfreeze (guardian only)
+    // -------------------------
+    function freeze(address primary, uint256 amount) external nonReentrant {
+        require(_primaryToGuardian[primary] == msg.sender, "CryptoCyte: only guardian can approve");
+        require(_whitelistedWallets[primary] && _whitelistedWallets[msg.sender], "CryptoCyte: wallets not whitelisted");
+        require(amount > 0, "CryptoCyte: amount must be > 0");
+        uint256 available = _internalSpendableBalanceOf(primary);
+        require(amount <= available, "CryptoCyte: insufficient unfrozen balance");
+
+        _userFrozenBalances[primary] += amount;
+        emit TokensFrozen(primary, amount);
+    }
+
+    function unfreeze(address primary, uint256 amount) external nonReentrant {
+        require(_primaryToGuardian[primary] == msg.sender, "CryptoCyte: only guardian can approve");
+        require(_whitelistedWallets[primary] && _whitelistedWallets[msg.sender], "CryptoCyte: wallets not whitelisted");
+        require(amount > 0, "CryptoCyte: amount must be > 0");
+        uint256 frozen = _userFrozenBalances[primary];
+        require(amount <= frozen, "CryptoCyte: insufficient frozen balance");
+
+        _userFrozenBalances[primary] -= amount;
+        emit TokensUnfrozen(primary, amount);
+    }
+
+    // -------------------------
+    // Upgrade flow (UUPS)
+    // -------------------------
+    function approveUpgrade() external onlyRole(UPGRADER_ROLE) {
+        _upgradeApproved = true;
+        emit UpgradeApproved(msg.sender);
+    }
+
+    function _authorizeUpgrade(address newImplementation) internal override onlyRole(UPGRADER_ROLE) {
+        require(_upgradeApproved, "CryptoCyte: upgrade not approved");
+        _upgradeApproved = false;
+        emit UpgradeExecuted(newImplementation);
+    }
+
+    // -------------------------
+    // Global pause
+    // -------------------------
+    function pause() external onlyRole(PAUSER_ROLE) { _pause(); }
+    function unpause() external onlyRole(PAUSER_ROLE) { _unpause(); }
+
+    // -------------------------
+    // Mint / Burn
+    // -------------------------
+    function mint(address to, uint256 amount) external onlyRole(MINTER_ROLE) nonReentrant {
+        require(amount > 0, "CryptoCyte: amount must be > 0");
+        _mint(to, amount);
+    }
+
+    function burn(address account, uint256 amount) external onlyRole(DEFAULT_ADMIN_ROLE) nonReentrant {
+        require(!paused(), "CryptoCyte: global pause active");
+        require(amount > 0, "CryptoCyte: amount must be > 0");
+        require(amount <= balanceOf(account), "CryptoCyte: burn exceeds balance");
+
+        if (_pausedWallets[account]) {
+            _pausedWallets[account] = false;
+            emit WalletUnpaused(account);
+        }
+
+        uint256 frozen = _userFrozenBalances[account];
+        if (frozen > 0) {
+            _userFrozenBalances[account] = 0;
+            emit TokensUnfrozen(account, frozen);
+        }
+
+        _burn(account, amount);
+    }
+
+    // -------------------------
+    // Wallet pause
+    // -------------------------
+    function pauseWallet(address account) external onlyRole(PAUSER_ROLE) {
+        _pausedWallets[account] = true;
+        emit WalletPaused(account);
+    }
+
+    function unpauseWallet(address account) external onlyRole(PAUSER_ROLE) {
+        _pausedWallets[account] = false;
+        emit WalletUnpaused(account);
+    }
+
+    function isWalletPaused(address account) external view returns (bool) {
+        return _pausedWallets[account];
+    }
+
+    // -------------------------
+    // Contract whitelist
+    // -------------------------
+    function addContractToWhitelist(address contractAddress) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        require(contractAddress != address(0), "CryptoCyte: invalid address");
+        require(_isContract(contractAddress), "CryptoCyte: not a contract");
+        require(!_contractWhitelist[contractAddress], "CryptoCyte: already whitelisted");
+        _contractWhitelist[contractAddress] = true;
+        emit ContractWhitelisted(contractAddress, msg.sender);
+    }
+
+    function removeContractFromWhitelist(address contractAddress) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        require(_contractWhitelist[contractAddress], "CryptoCyte: not whitelisted");
+        _contractWhitelist[contractAddress] = false;
+        emit ContractRemovedFromWhitelist(contractAddress, msg.sender);
+    }
+
+    function isContractWhitelisted(address contractAddress) external view returns (bool) {
+        return _contractWhitelist[contractAddress];
+    }
+
+    // -------------------------
+    // Balance access
+    // -------------------------
+    function frozenBalance(address account) public view returns (uint256) {
+        return _userFrozenBalances[account];
+    }
+
+    function unfrozenBalance(address account) public view returns (uint256) {
+        uint256 total = balanceOf(account);
+        uint256 frozen = frozenBalance(account);
+        require(frozen <= total, "CryptoCyte: frozen balance exceeds total balance");
+        return total - frozen;
+    }
+
+    function spendableBalance(address account) public view returns (uint256) {
+        return unfrozenBalance(account);
+    }
+
+    function _internalSpendableBalanceOf(address account) internal view returns (uint256) {
+        return unfrozenBalance(account);
+    }
+
+    // -------------------------
+    // Transfer enforcement
+    // -------------------------
+    function _update(address from, address to, uint256 amount) internal override(ERC20Upgradeable, ERC20PausableUpgradeable) {
+        if (from != address(0)) {
+            if (_pausedWallets[from]) revert WalletPausedError(from);
+
+            uint256 totalBalance = balanceOf(from);
+            uint256 frozen = frozenBalance(from);
+            require(frozen <= totalBalance, "CryptoCyte: frozen balance exceeds total balance");
+            uint256 available = totalBalance - frozen;
+            if (amount > available) revert TransferExceedsAvailable(from, amount, available);
+
+            if (_isContract(from)) {
+                require(_contractWhitelist[from], "CryptoCyte: sender contract not whitelisted");
+            }
+        }
+
+        if (_isContract(to)) {
+            require(_contractWhitelist[to], "CryptoCyte: recipient contract not whitelisted");
+        }
+
+        super._update(from, to, amount);
+    }
+
+    // -------------------------
+    // Internal utilities
+    // -------------------------
+    function _isContract(address account) internal view returns (bool) {
+        return account.code.length > 0;
+    }
+}
