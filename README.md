@@ -59,6 +59,55 @@ All role assignments and administrative actions are recorded on-chain for comple
 
 ---
 
+## **Transparency and Verification**
+
+Type	Tool	Verification Link
+Audit	HashLock	View Report
+Audit	TokenSniffer	View Report
+Audit	Honeypot.is	View Report
+Immutable Docs	OpenTimeStamps	Whitepaper • Lite Paper
+
+All project documents are immutably timestamped for independent verification.
+
+---
+
+## **Legal and Compliance**
+
+CryptoCyte (CD355) is an ERC20 token designed to functiona as a virtual currency.
+
+No warranties are provided regarding liquidity, market performance, or speculative value.
+
+Use of this codebase implies agreement to the Hold Harmless and Indemnification Statement of the Bolton-Strid Foundation.
+
+All external audit tools (HashLock, TokenSniffer, Honeypot.is) are independent third-party services; their findings are advisory and not legally binding.
+
+The Foundation assumes no liability for interpretations of third-party results.
+
+---
+
+## **Repository Structure**
+
+/contracts
+    └── CryptoCyte.sol
+/docs
+    ├── Whitepaper.pdf
+    ├── Governance_Policy.pdf
+    ├── Roadmap.pdf
+/README.md
+
+---
+
+## **Contact**
+
+Entity: Bolton-Strid Foundation
+Email: info@Bolton-Strid.org
+Website: https://bolton-strid.org
+Organization Type: Nonprofit Healthcare and Technology Foundation
+
+© 2025 Bolton-Strid Foundation. All rights reserved.
+
+---
+
 ## **Solidity API and Function Overview**
 
 ```solidity
@@ -131,42 +180,5 @@ ERC20PausableUpgradeable	Enables contract-level suspension
 UUPSUpgradeable	Provides controlled upgradeability
 Permit Framework	Nonce system present but inactive until permit() is implemented
 
-Transparency and Verification
-Type	Tool	Verification Link
-Audit	HashLock	View Report
-Audit	TokenSniffer	View Report
-Audit	Honeypot.is	View Report
-Immutable Docs	OpenTimeStamps	Whitepaper • Lite Paper
-
-All project documents are immutably timestamped for independent verification.
 
 
-Legal and Compliance
-CryptoCyte (CD355) is an ERC20 token designed to functiona as a virtual currency.
-
-No warranties are provided regarding liquidity, market performance, or speculative value.
-
-Use of this codebase implies agreement to the Hold Harmless and Indemnification Statement of the Bolton-Strid Foundation.
-
-All external audit tools (HashLock, TokenSniffer, Honeypot.is) are independent third-party services; their findings are advisory and not legally binding.
-
-The Foundation assumes no liability for interpretations of third-party results.
-
-Repository Structure
-bash
-Copy code
-/contracts
-    └── CryptoCyte.sol
-/docs
-    ├── Whitepaper.pdf
-    ├── Governance_Policy.pdf
-    ├── Roadmap.pdf
-/README.md
-
-Contact
-Entity: Bolton-Strid Foundation
-Email: info@Bolton-Strid.org
-Website: https://bolton-strid.org
-Organization Type: Nonprofit Healthcare and Technology Foundation
-
-© 2025 Bolton-Strid Foundation. All rights reserved.
